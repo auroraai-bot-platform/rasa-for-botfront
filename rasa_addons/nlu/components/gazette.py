@@ -17,14 +17,14 @@ from fuzzy_matcher import process
 
 class Gazette(Component):
     name = "Gazette"
-
     defaults = {"max_num_suggestions": 5, "entities": []}
 
     def __init__(
         self, component_config: Text = None, gazette: Optional[Dict] = None
     ) -> None:
-
         super(Gazette, self).__init__(component_config)
+        self.component_config["entities"] = gazette["entities"] if gazette and "entities" in gazette else []
+        gazette = gazette["gazette"] if gazette and "gazette" in gazette else None
         self.gazette = gazette if gazette else {}
         if gazette:
             self._load_config()
@@ -35,7 +35,6 @@ class Gazette(Component):
 
         entities = message.get("entities", [])
         new_entities = []
-
         for entity in entities:
             config = self._find_entity(entity, self.entities)
             if config is None or not isinstance(entity["value"], str):
@@ -49,33 +48,39 @@ class Gazette(Component):
                 scorer=config["mode"],
             )
             primary, score = matches[0] if len(matches) else (None, None)
-
             if primary is not None and score > config["min_score"]:
                 entity["value"] = primary
-                entity["gazette_matches"] = [
-                    {"value": value, "score": num} for value, num in matches
-                ]
-                new_entities.append(entity)
 
-        message.set("entities", new_entities)
+                # gazette_matches value seems to make error in certain botfront graphql requests
+                # entity["gazette_matches"] = [
+                #     {"value": value, "score": num} for value, num in matches
+                # ]
+            new_entities.append(entity)
+
+        message.set("entities", new_entities, add_to_output=True)
 
     def train(
         self, training_data: TrainingData, cfg: RasaNLUModelConfig, **kwargs: Any
     ) -> None:
         gazette_dict = {}
         if hasattr(training_data, "gazette") and type(training_data.gazette) == list:
+            training_data.gazette = [gazette for gazette in training_data.gazette if type(
+                gazette) is dict and "value" in gazette and "gazette" in gazette]
             for item in training_data.gazette:
                 name = item["value"]
                 table = item["gazette"]
                 gazette_dict[name] = table
             self.gazette = gazette_dict
+            self.entities = [{"name": entity}
+                             for entity in list(gazette_dict.keys())]
 
     def persist(self, file_name: Text, model_dir: Text) -> Optional[Dict[Text, Any]]:
         file_name = file_name + ".json"
-        utils.write_json_to_file(os.path.join(model_dir, file_name), self.gazette, indent=4)
+        utils.write_json_to_file(os.path.join(
+            model_dir, file_name), {"gazette": self.gazette, "entities": self.entities}, indent=4)
 
         return {"file": file_name}
-    
+
     @classmethod
     def load(
         cls,
@@ -86,7 +91,8 @@ class Gazette(Component):
         **kwargs: Any
     ) -> "Gazette":
         try:
-            file = os.path.join(model_dir, component_meta.get("file", "gazette.json"))
+            file = os.path.join(
+                model_dir, component_meta.get("file", "gazette.json"))
             return Gazette(component_meta, rasa.shared.utils.io.read_json_file(file))
         except:
             warnings.warn("Could not load gazette.")
@@ -114,7 +120,9 @@ class Gazette(Component):
             )
 
             supported_properties = ["mode", "min_score"]
-            defaults = ["ratio", 80]
+            mode = self.component_config.get("mode", "ratio")
+            min_score = self.component_config.get("min_score", 80)
+            defaults = [mode, min_score]
             types = [str, int]
 
             new_element = {"name": rep["name"]}
@@ -123,7 +131,6 @@ class Gazette(Component):
                     new_element[prop] = default
                 else:
                     new_element[prop] = t(rep[prop])
-
             entities.append(new_element)
 
         self.component_config["entities"] = entities
