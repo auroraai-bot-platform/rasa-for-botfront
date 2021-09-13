@@ -4,6 +4,9 @@ A fork to be used with **Botfront**, an open source chatbot platform built with 
 
 For more information visit the [Botfront project on Github](https://github.com/botfront/botfront)
 
+# How to build rasa-for-botfront locally
+
+You can build docker image by running `docker build -f docker/Dockerfile.botfront -t rasa-for-botfront .` and then run the container with Botfront or use the image as the base for building custom rasa-for-botfront images with, for example, custom addons.
 
 # Rasa Addons
 
