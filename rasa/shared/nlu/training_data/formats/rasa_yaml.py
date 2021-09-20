@@ -33,6 +33,8 @@ KEY_INTENT_EXAMPLES = "examples"
 KEY_INTENT_TEXT = "text"
 KEY_SYNONYM = "synonym"
 KEY_SYNONYM_EXAMPLES = "examples"
+KEY_GAZETTE = "gazette"
+KEY_GAZETTE_EXAMPLES = "examples"
 KEY_REGEX = "regex"
 KEY_REGEX_EXAMPLES = "examples"
 KEY_LOOKUP = "lookup"
@@ -55,6 +57,7 @@ class RasaYAMLReader(TrainingDataReader):
         self.entity_synonyms: Dict[Text, Text] = {}
         self.regex_features: List[Dict[Text, Text]] = []
         self.lookup_tables: List[Dict[Text, Any]] = []
+        self.gazette: List[Dict[Text, List[Text]]] = []
         self.responses: Dict[Text, List[Dict[Text, Any]]] = {}
 
     def validate(self, string: Text) -> None:
@@ -97,6 +100,7 @@ class RasaYAMLReader(TrainingDataReader):
             self.entity_synonyms,
             self.regex_features,
             self.lookup_tables,
+            self.gazette,
             self.responses,
         )
     
@@ -117,6 +121,7 @@ class RasaYAMLReader(TrainingDataReader):
             self.entity_synonyms,
             self.regex_features,
             self.lookup_tables,
+            self.gazette,
             self.responses,
         )
 
@@ -144,13 +149,15 @@ class RasaYAMLReader(TrainingDataReader):
                 self._parse_regex(nlu_item)
             elif KEY_LOOKUP in nlu_item.keys():
                 self._parse_lookup(nlu_item)
+            elif KEY_GAZETTE in nlu_item.keys():
+                self._parse_gazette(nlu_item)
             else:
                 rasa.shared.utils.io.raise_warning(
                     f"Issue found while processing '{self.filename}': "
                     f"Could not find supported key in the section:\n"
                     f"{nlu_item}\n"
                     f"Supported keys are: '{KEY_INTENT}', '{KEY_SYNONYM}', "
-                    f"'{KEY_REGEX}', '{KEY_LOOKUP}'. "
+                    f"'{KEY_REGEX}', '{KEY_LOOKUP}', '{KEY_GAZETTE}'. "
                     f"This section will be skipped.",
                     docs=DOCS_URL_TRAINING_DATA,
                 )
@@ -265,6 +272,41 @@ class RasaYAMLReader(TrainingDataReader):
 
         for example in self._parse_multiline_example(synonym_name, examples):
             synonyms_parser.add_synonym(example, synonym_name, self.entity_synonyms)
+
+    def _parse_gazette(self, nlu_item: Dict[Text, Any]) -> None:
+        import rasa.shared.nlu.training_data.gazette_parser as gazette_parser
+        gazette_name = nlu_item[KEY_GAZETTE]
+        if not gazette_name:
+            rasa.shared.utils.io.raise_warning(
+                f"Issue found while processing '{self.filename}': "
+                f"The gazette has an empty name."
+                f"Gazette should have a name defined under the '{KEY_GAZETTE}' key. "
+                f"It will be skipped.",
+                docs=DOCS_URL_TRAINING_DATA,
+            )
+            return
+
+        examples = nlu_item.get(KEY_GAZETTE_EXAMPLES, "")
+        if not examples:
+            rasa.shared.utils.io.raise_warning(
+                f"Issue found while processing '{self.filename}': "
+                f"'{KEY_GAZETTE}: {gazette_name}' doesn't have any examples. "
+                f"It will be skipped.",
+                docs=DOCS_URL_TRAINING_DATA,
+            )
+            return
+
+        if not isinstance(examples, str):
+            rasa.shared.utils.io.raise_warning(
+                f"Unexpected block found in '{self.filename}':\n"
+                f"{examples}\n"
+                f"This block will be skipped.",
+                docs=DOCS_URL_TRAINING_DATA,
+            )
+            return
+
+        for example in self._parse_multiline_example(gazette_name, examples):
+            gazette_parser.add_item_to_gazette(gazette_name, example, self.gazette)
 
     def _parse_regex(self, nlu_item: Dict[Text, Any]) -> None:
         regex_name = nlu_item[KEY_REGEX]
@@ -417,6 +459,7 @@ class RasaYAMLWriter(TrainingDataWriter):
         nlu_items = []
         nlu_items.extend(cls.process_intents(training_data))
         nlu_items.extend(cls.process_synonyms(training_data))
+        nlu_items.extend(cls.process_gazette(training_data))
         nlu_items.extend(cls.process_regexes(training_data))
         nlu_items.extend(cls.process_lookup_tables(training_data))
 
@@ -458,6 +501,16 @@ class RasaYAMLWriter(TrainingDataWriter):
 
         return cls.process_training_examples_by_key(
             inverted_synonyms, KEY_SYNONYM, KEY_SYNONYM_EXAMPLES
+        )
+
+    @classmethod
+    def process_gazette(cls, training_data: "TrainingData") -> List[OrderedDict]:
+        inverted_gazettes = OrderedDict()
+        for gazette in training_data.gazette:
+            inverted_gazettes[gazette["value"]] = gazette["gazette"]
+
+        return cls.process_training_examples_by_key(
+            inverted_gazettes, KEY_GAZETTE, KEY_GAZETTE_EXAMPLES
         )
 
     @classmethod
